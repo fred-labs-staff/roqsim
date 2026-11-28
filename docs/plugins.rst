@@ -686,8 +686,8 @@ It looks only at what is within the reach of its probe and its model, so a mover
 casts no ray. A world's keys win over what the embodiment declares, each value taken is logged, and
 ``perception: false`` keeps a mover seeing everything. The ``walker`` output declares
 ``{eye_height: 1.64, fov: 75, memory: 4.0, reaction: 0.4}`` (m, degrees to each side, s, s). A model
-that cannot limit an agent to what its mover perceives (``AvoidanceModel.perceive``) is refused for
-a mover that perceives; ``give_way`` and ``orca`` can.
+that cannot limit an agent to what its mover perceives (``AvoidanceModel.perceive``) is refused,
+when the world loads, for a mover that perceives and steers by it; ``give_way`` and ``orca`` can.
 
 .. code-block:: yaml
 

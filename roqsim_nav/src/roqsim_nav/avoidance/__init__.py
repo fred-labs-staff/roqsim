@@ -181,8 +181,8 @@ class AvoidanceModel(ABC):
         gives way to every other.
 
         A model that cannot limit an agent's solve to some of the others raises
-        :class:`NotImplementedError`, and a world whose mover perceives is refused rather than
-        having it steer round what it cannot see.
+        :class:`NotImplementedError` (this default), and a world whose mover perceives and steers
+        by it is refused when it loads, rather than having it steer round what it cannot see.
         """
         raise NotImplementedError
 

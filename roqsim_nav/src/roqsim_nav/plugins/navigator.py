@@ -86,7 +86,7 @@ from roqsim.schema import Field
 from roqsim.types import Length
 
 from .._resolve import RegistryError
-from ..avoidance import NO_AGENT, SERVICE_KEY, resolve_model, service_for
+from ..avoidance import NO_AGENT, SERVICE_KEY, AvoidanceModel, resolve_model, service_for
 from ..avoidance import available as avoidance_models
 from ..behavior import NavCore, NavParams, build_tree
 from ..caution import _CROSSING, RETIRED, CautionProbe
@@ -779,7 +779,7 @@ class NavigatorPlugin(Plugin):
             # Created here, joined at reset. Configure order is deterministic and every configure
             # precedes every reset, so a mover that only opts OUT still finds the model at reset
             # time and can register as something the others must avoid.
-            service_for(ctx, spec, self.base_dir)
+            service = service_for(ctx, spec, self.base_dir)
 
         self._caution = CautionProbe(
             {
@@ -797,6 +797,14 @@ class NavigatorPlugin(Plugin):
         self._sight = self._perception(entity)
         if self._sight is not None:
             self._sight.attach(self._caution._own)
+            if self._yields and type(service.model).perceive is AvoidanceModel.perceive:
+                # Refused at load, not at the first step: a world that cannot run should not start.
+                raise RegistryError(
+                    f"navigator {self.address!r}: avoidance model {steer!r} cannot limit an "
+                    f"agent's steering to what its mover perceives, so this mover's `perception` "
+                    f"cannot apply to its steering. Steer it with a model that can (give_way, "
+                    f"orca), or set `perception: false`."
+                )
         # `sidestep: false` keeps it off, whatever its embodiment declares: a world's own key wins.
         side = avoid.get("sidestep")
         self._sidestep = (
