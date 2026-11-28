@@ -714,7 +714,12 @@ a mover that perceives; ``give_way`` and ``orca`` can.
 expires, and plans around it. The memory is what makes it work -- the grid is static, so a mover that
 merely re-planned would return the same path and drive into the same obstacle for ever. It is
 deliberately not a costmap: a handful of discs, stamped onto a copy of the raster at plan time and
-nowhere else. ``recovery`` is separate again, for a mover that is wedged rather than merely blocked.
+nowhere else. ``recovery`` is separate again, for a mover that is wedged rather than merely blocked. Waiting for
+traffic is not being wedged: while the probe holds a mover, or its model holds it back for another
+agent (``AvoidanceModel.holds``: ``orca`` does where another agent rules out what it wants, not only a
+wall), the time it stands does not count toward ``stuck_time`` -- a model's hold for ``yield_time``,
+as the probe reads a blockage, so a mover stalled for good before an agent standing in its way still
+recovers round it.
 
 ``steer`` names the local model, resolved from the ``roqsim_nav.avoidance`` registry -- ORCA is one
 implementation, RVO2's solve ported to Python, walls included. Every mover joins the model whether or not it

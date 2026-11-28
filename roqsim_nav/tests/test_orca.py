@@ -300,3 +300,32 @@ def test_it_chooses_what_rvo2_chooses_in_random_rooms():
                 ours._agents[i]["vel"] = v
                 pos[i] = pos[i] + v * DT
     assert not elsewhere, f"differs from rvo2 away from contact at {elsewhere[:5]}"
+
+
+def test_an_agent_held_back_by_another_is_held_and_one_held_by_a_wall_is_not():
+    # an agent walking into one that stands across its way, too near to go round in a step
+    model = _model()
+    a = model.add_agent("a", radius=0.23, max_speed=1.0, yields=True, params={})
+    b = model.add_agent("b", radius=0.3, max_speed=0.0, yields=False, params={})
+    model.submit(a, (0.0, 0.0), np.zeros(2), np.array([0.5, 0.0]))
+    model.submit(b, (0.8, 0.0), np.zeros(2), np.zeros(2))
+    model.solve(DT)
+    assert model.holds(a)
+    assert not model.holds(b)
+    # the same agent walking into a wall, nothing else near
+    walled = _model()
+    w = walled.add_agent("a", radius=0.23, max_speed=1.0, yields=True, params={})
+    walled.add_static([_box(0.6, 0.0, 0.1, 2.0)])
+    walled.submit(w, (0.0, 0.0), np.zeros(2), np.array([0.5, 0.0]))
+    walled.solve(DT)
+    assert float(np.linalg.norm(walled.result(w))) < 0.25, "the wall did not slow it"
+    assert not walled.holds(w)
+
+
+def test_an_agent_not_slowed_is_not_held():
+    model = _model()
+    a, b, _ = _two(model, offset=3.0)  # far apart: neither is in the other's way
+    model.submit(a, (-3.0, 0.0), np.zeros(2), np.array([1.0, 0.0]))
+    model.submit(b, (3.0, 3.0), np.zeros(2), np.array([-1.0, 0.0]))
+    model.solve(DT)
+    assert not model.holds(a) and not model.holds(b)

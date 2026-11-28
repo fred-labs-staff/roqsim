@@ -96,7 +96,7 @@ class AvoidanceModel(ABC):
     implementation's business and none of it appears here. A model that thinks in accelerations
     integrates them itself. That is what keeps this from becoming ORCA's API under another name.
 
-    Seven things about the shape below are load-bearing, and each is something a narrower interface
+    Eight things about the shape below are load-bearing, and each is something a narrower interface
     would have got wrong:
 
     * :meth:`submit`, :meth:`solve` and :meth:`result` are **three phases, not one call**. ORCA's
@@ -120,6 +120,8 @@ class AvoidanceModel(ABC):
     * :meth:`perceive` limits what an agent gives way to, every tick its mover looks, because a
       mover that stands for a person meets only what it can see (:mod:`roqsim_nav.perception`);
       a model that cannot do it is refused for such a mover rather than seeing through walls.
+    * :meth:`holds` says the last solve held an agent back for another agent, so its navigator
+      does not count waiting for traffic as being stuck and give up on its goal.
 
     **The one known limit, stated rather than smuggled:** an agent is a **disc**. A long cart is its
     circumscribed circle. Widening to footprints is a real interface change -- a new ``add_agent``
@@ -174,6 +176,13 @@ class AvoidanceModel(ABC):
         ignored agent steered round regardless.
         """
         raise NotImplementedError
+
+    def holds(self, aid) -> bool:
+        """Whether the last solve held agent ``aid`` back for another agent: slowed it below half
+        its preferred speed because another agent was in its way, as a mover waits for traffic --
+        not because a wall was. Its navigator does not count such a wait as being stuck. A model
+        that cannot tell never holds an agent, and a slow agent's stuck clock runs as before."""
+        return False
 
     def perceive(self, aid, others) -> None:
         """Let ``aid`` give way only to ``others`` (agent ids) until told again: what its mover
@@ -347,6 +356,9 @@ class AvoidanceService:
 
     def result(self, aid) -> np.ndarray:
         return self.model.result(aid)
+
+    def holds(self, aid) -> bool:
+        return bool(self.model.holds(aid))
 
 
 def service_for(ctx, spec, base_dir=None) -> AvoidanceService:

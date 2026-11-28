@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 _MAX_NEIGHBORS = 10
 _OBSTACLE_HORIZON = 2.0
 
+#: Slower than this share of its preferred speed, an agent another agent's half-plane rules out is
+#: held for traffic (:meth:`OrcaModel.holds`); one slowed by walls alone is not.
+_HELD = 0.5
+
 
 class OrcaModel(AvoidanceModel):
     """ORCA over every agent of the world, solved agent by agent each step."""
@@ -165,10 +169,25 @@ class OrcaModel(AvoidanceModel):
                 for _, j in near[:_MAX_NEIGHBORS]
             ]
             agent["new"] = np.array(new_velocity(walls, others, agent["max_speed"], agent["pref"]))
+            # Held for traffic: what it wants is ruled out by another agent, not only by walls.
+            pref = agent["pref"]
+            agent["held"] = bool(
+                np.hypot(*agent["new"]) < _HELD * np.hypot(*pref)
+                and any(
+                    line is not None
+                    and (line[2] * (line[1] - pref[1]) - line[3] * (line[0] - pref[0])) > 0.0
+                    for line in others
+                )
+            )
         for agent in agents:
             if agent["yields"]:
                 # What it chose becomes what it moves at, for the others' next solve and its own.
                 agent["vel"] = agent["new"] if agent["present"] else np.zeros(2)
+
+    def holds(self, aid) -> bool:
+        if aid == NO_AGENT:
+            return False
+        return bool(self._agents[aid].get("held", False))
 
     def result(self, aid) -> np.ndarray:
         if aid == NO_AGENT:
@@ -188,6 +207,7 @@ class OrcaModel(AvoidanceModel):
             agent["pref"] = np.zeros(2)
             agent["vel"] = np.zeros(2)
             agent["new"] = np.zeros(2)
+            agent["held"] = False
             # Nowhere until it is submitted again: a run does not start from where the last one
             # left its agents.
             agent["present"] = False

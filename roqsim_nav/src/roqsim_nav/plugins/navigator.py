@@ -579,6 +579,8 @@ class NavigatorPlugin(Plugin):
         self._period = 0.0
         self._started = False
         self._caution: CautionProbe | None = None
+        #: Since when its avoidance model has held it back for traffic, or ``None``.
+        self._held_since: float | None = None
         self._sight: Sight | None = None
         self._bid = -1
         self._seq = Sequencer()
@@ -1020,6 +1022,7 @@ class NavigatorPlugin(Plugin):
         # name one declared after this mover.
         self._caution.resolve_ignored(ctx)
         self._caution.reset()
+        self._held_since = None
         if self._sight is not None:
             self._sight.reset()
         self._accum = 0.0
@@ -1112,6 +1115,18 @@ class NavigatorPlugin(Plugin):
                 present=bool(entity.present) if entity is not None else True,
             )
             wanted = self._avoid.result(self._agent)
+            if self._yields and self._avoid.holds(self._agent):
+                # Held back for traffic by its model: waiting for a mover to pass is not being
+                # stuck, and must not talk it into a recovery -- for `yield_time`, as the probe
+                # reads a blockage. Held longer, by an agent that stands where its way is, it may
+                # be stalled for good, and recovery is how it gets round.
+                now = float(ctx.sim_time)
+                if self._held_since is None:
+                    self._held_since = now
+                if now - self._held_since < self._caution.yield_time:
+                    self._core.forget_progress()
+            else:
+                self._held_since = None
             if self._core.exact:
                 # still an agent the others give way to, but it walks the legs it was given
                 wanted = preferred
