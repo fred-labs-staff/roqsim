@@ -96,7 +96,7 @@ class AvoidanceModel(ABC):
     implementation's business and none of it appears here. A model that thinks in accelerations
     integrates them itself. That is what keeps this from becoming ORCA's API under another name.
 
-    Six things about the shape below are load-bearing, and each is something a narrower interface
+    Seven things about the shape below are load-bearing, and each is something a narrower interface
     would have got wrong:
 
     * :meth:`submit`, :meth:`solve` and :meth:`result` are **three phases, not one call**. ORCA's
@@ -117,6 +117,9 @@ class AvoidanceModel(ABC):
     * ``present`` honours :mod:`roqsim.presence`, so an entity made absent stops deflecting others,
       exactly as it stops being seen by every raycaster.
     * :meth:`reset` exists because runs do: agents and walls survive one, velocities must not.
+    * :meth:`perceive` limits what an agent gives way to, every tick its mover looks, because a
+      mover that stands for a person meets only what it can see (:mod:`roqsim_nav.perception`);
+      a model that cannot do it is refused for such a mover rather than seeing through walls.
 
     **The one known limit, stated rather than smuggled:** an agent is a **disc**. A long cart is its
     circumscribed circle. Widening to footprints is a real interface change -- a new ``add_agent``
@@ -169,6 +172,17 @@ class AvoidanceModel(ABC):
         A model that cannot leave one agent out of another's solve raises
         :class:`NotImplementedError`, and a world asking it to is refused rather than having the
         ignored agent steered round regardless.
+        """
+        raise NotImplementedError
+
+    def perceive(self, aid, others) -> None:
+        """Let ``aid`` give way only to ``others`` (agent ids) until told again: what its mover
+        perceives (:mod:`roqsim_nav.perception`), set every tick it looks. An agent never told
+        gives way to every other.
+
+        A model that cannot limit an agent's solve to some of the others raises
+        :class:`NotImplementedError`, and a world whose mover perceives is refused rather than
+        having it steer round what it cannot see.
         """
         raise NotImplementedError
 
@@ -287,6 +301,19 @@ class AvoidanceService:
         """Let agent ``aid`` never give way to the entity ``key``: its navigator's ``ignore``.
         Applied once every agent has joined, at the first solve of the run."""
         self._exclusions.append((aid, key))
+
+    def perceive(self, aid, keys) -> None:
+        """Let agent ``aid`` give way only to the entities ``keys``: what its mover perceives. A key
+        that is no agent (a prop that does not stand on the floor) is left out."""
+        others = {self._aids[k] for k in keys if k in self._aids}
+        try:
+            self.model.perceive(aid, others)
+        except NotImplementedError:
+            raise RegistryError(
+                f"avoidance model {self.ref!r} cannot limit an agent's steering to what its mover "
+                f"perceives, so a mover's `perception` cannot apply to its steering. Steer that "
+                f"mover with a model that can (give_way, orca), or set `perception: false`."
+            ) from None
 
     def ensure_reset(self, ctx) -> None:
         """Reset the model once per reset of the world, whichever mover gets here first.

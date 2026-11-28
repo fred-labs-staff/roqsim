@@ -55,6 +55,12 @@ class NavOutput(ABC):
     #: logs each value it takes from here.
     avoidance_defaults: Mapping[str, object] = MappingProxyType({})
 
+    #: What this embodiment's mover perceives (:mod:`roqsim_nav.perception`): ``eye_height``,
+    #: ``fov``, ``memory``, ``reaction``. Empty: it perceives everything that moves, at once, as a
+    #: robot under a navigator does. A world's ``perception:`` keys win; the navigator logs each
+    #: value it takes from here.
+    perception: Mapping[str, float] = MappingProxyType({})
+
     #: The disc this embodiment's mover is to an avoidance model, where the world sets no
     #: ``radius``: a body whose collision model is wider than what it stands for (a walker's hips)
     #: declares the width of what it stands for. ``None``: its measured footprint. The planner's

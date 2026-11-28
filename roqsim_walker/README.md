@@ -89,6 +89,11 @@ output declares the probe's `width`, `horizon`, `decel`, `stop_gap`, `wait_gap`,
 back (`sidestep`; `sidestep: false` keeps it standing on its route), all of which `roqsim_nav`'s
 docs describe; a world's own key wins. For ORCA, use `steer: orca`.
 
+Both its probe and its model meet only what the walker perceives: what it can see from an eye 1.64 m
+up within 75 degrees of its heading, once it has been in sight 0.4 s, and for 4 s after it went out
+of sight (`WALKER_PERCEPTION`; walls and other movers block its sight). `perception: false` on its
+navigator has it see everything, as a robot does.
+
 ### Goals at runtime
 
 Where a walker goes is its navigator's, as for every mover, so a route goes to the navigator's

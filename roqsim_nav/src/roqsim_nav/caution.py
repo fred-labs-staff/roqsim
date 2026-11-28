@@ -38,6 +38,9 @@ What is in the way is what reaches past the body's front: a thing already inside
 reaches past it is in the way at once, and one beside the body -- a walker abreast, a shoulder
 touching -- is not.
 What the mover holds (a body an active weld or connect ties to one of its own) is never in its way.
+A mover that perceives (:mod:`roqsim_nav.perception`) has its navigator tell the probe what it
+perceives every tick (:attr:`CautionProbe.perceived`): what it does not perceive is not in its way,
+unless it already reaches into its body.
 
 Because the same corridor decides holding and setting off, a held mover sets off only once nothing
 that moves reaches into it, with at least the clearance it stops for.
@@ -222,6 +225,12 @@ class CautionProbe:
         #: mover. `reroute` marks all of them, which outlines how far the thing that stopped it
         #: extends across the corridor.
         self.blocker_points: list = []
+        #: The things it perceives (:mod:`roqsim_nav.perception`), set by its navigator every tick,
+        #: or ``None`` for a mover that perceives everything. A thing it does not perceive is not in
+        #: its way unless it already reaches into its body: what touches it, it feels.
+        self.perceived: set | None = None
+        #: The entity name of each thing that is an entity, by thing.
+        self.owner_names: dict[int, str] = {}
 
     #: What this probe reads out of an ``avoidance:`` block, for the navigator to validate against.
     KEYS = _TUNING
@@ -294,11 +303,13 @@ class CautionProbe:
         # walker for what counts as in the way.
         self._entity_of = {}
         self._owner_body = {}
+        self.owner_names = {}
         for k, other in enumerate(ctx.entities.all()):
             if other.body:
                 for g in entity_geoms(model, other, strict=False):
                     self._entity_of.setdefault(int(g), k)
                 self._owner_body[k] = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, other.body)
+                self.owner_names[k] = other.name
         self._others = None
         self._resolved = True
 
@@ -586,6 +597,13 @@ class CautionProbe:
                 meets &= along < _ALONG * float(speed)
             for i in np.flatnonzero(meets):
                 dist = covered + max(lo_x, float(c[i, 0] - r[i, 0])) - lo_x
+                if (
+                    self.perceived is not None
+                    and dist > 0.0
+                    and int(owners[i]) not in self.perceived
+                ):
+                    # Not perceived, and not touching it: not in its way.
+                    continue
                 near = np.clip(np.array([lo_x, 0.0, 0.0]), c[i] - r[i], c[i] + r[i])
                 # Where it comes nearest, and across the corridor as far as it spans it: a long
                 # barrier outlines itself by the points it shows the corridor, which is what
@@ -730,6 +748,24 @@ class CautionProbe:
             if n > 1e-9:
                 legs.append((q, q + d / n * 1e3))
         return legs
+
+    def things(self, model) -> dict:
+        """What it could perceive: every thing that moves and is not ignored, by thing, with its
+        geoms in the visible groups (an absent thing has none)."""
+        others, owners = self._candidates(model)
+        visible = raycast.VISIBLE_GROUPS[model.geom_group[others]] > 0
+        others, owners = others[visible], owners[visible]
+        out: dict[int, list] = {}
+        for g, o in zip(others.tolist(), owners.tolist(), strict=True):
+            out.setdefault(o, []).append(g)
+        return {o: np.array(gs, dtype=int) for o, gs in out.items()}
+
+    def held_geoms(self, model, data) -> list[int]:
+        """The geoms of what the mover holds (an active weld or connect to one of its bodies)."""
+        held = _held_bodies(model, data, self._body)
+        if not held:
+            return []
+        return [g for g in range(model.ngeom) if int(model.geom_bodyid[g]) in held]
 
     def _candidates(self, model):
         """Every geom of a thing that moves, other than the mover's own and the ignored ones, and

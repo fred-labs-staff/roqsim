@@ -672,6 +672,31 @@ and stands.
      stop: true
      sidestep: {max: 1.0, onset: 2.2, back: 4.85, clearance: 0.24}
 
+**What it perceives** is ``perception``. Without it (the default) the probe and the model look at
+everything that moves, wherever it is: right for a robot under a navigator, which is apparatus. An
+embodiment that stands for a person declares what it sees (``NavOutput.perception``), and then its
+probe and its model meet only what it perceives. Seen is a clear sight line from an eye
+``eye_height`` above the bottom of its body to a part of the thing -- the centres of up to four of
+its geoms, visual ones included -- within ``fov`` degrees of its heading; walls, shelves, door frames
+and other movers block it, its own body and what it holds do not. What comes into sight is perceived
+once it has been in sight ``reaction`` seconds; what goes out of sight stays perceived ``memory``
+seconds where it really is, then is forgotten. At the first look of a run, what is in sight is
+perceived at once. What already reaches into its body is in its way whether it perceives it or not.
+It looks only at what is within the reach of its probe and its model, so a mover with nothing near
+casts no ray. A world's keys win over what the embodiment declares, each value taken is logged, and
+``perception: false`` keeps a mover seeing everything. The ``walker`` output declares
+``{eye_height: 1.64, fov: 75, memory: 4.0, reaction: 0.4}`` (m, degrees to each side, s, s). A model
+that cannot limit an agent to what its mover perceives (``AvoidanceModel.perceive``) is refused for
+a mover that perceives; ``give_way`` and ``orca`` can.
+
+.. code-block:: yaml
+
+   perception:
+     eye_height: 1.64    # m above the bottom of its body
+     fov: 75             # degrees to either side of its heading
+     memory: 4.0         # s: what went out of sight is kept in mind this long
+     reaction: 0.4       # s: what came into sight is acted on after this long
+
 ``reroute`` is the opt-in that changes that: it remembers where it was stopped as a disc that
 expires, and plans around it. The memory is what makes it work -- the grid is static, so a mover that
 merely re-planned would return the same path and drive into the same obstacle for ever. It is

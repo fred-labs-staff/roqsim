@@ -45,6 +45,8 @@ class OrcaModel(AvoidanceModel):
         self._agents: list[dict] = []
         self._edges = Edges()
         self._excluded: dict[int, set[int]] = {}
+        #: What each agent's mover perceives, as agent ids; an agent not here sees every other.
+        self._perceived: dict[int, set[int]] = {}
         self.neighbor_dist = 4.0
         self.time_horizon = 3.0
         #: The gap two agents keep passing (m), and how much more for each m/s they close at (s).
@@ -99,6 +101,9 @@ class OrcaModel(AvoidanceModel):
     def exclude(self, aid, other) -> None:
         self._excluded.setdefault(aid, set()).add(other)
 
+    def perceive(self, aid, others) -> None:
+        self._perceived[aid] = set(others)
+
     def submit(self, aid, pos, vel, pref_vel, *, present: bool = True) -> None:
         if aid == NO_AGENT:
             return
@@ -135,10 +140,11 @@ class OrcaModel(AvoidanceModel):
                 _OBSTACLE_HORIZON,
             )
             skip = self._excluded.get(i, ())
+            sees = self._perceived.get(i)
             range_sq = agent["neighbor_dist"] ** 2
             near = []
             for j in present:
-                if j == i or j in skip:
+                if j == i or j in skip or (sees is not None and j not in sees):
                     continue
                 d = agents[j]["pos"] - pos
                 dist_sq = float(d[0] * d[0] + d[1] * d[1])
@@ -177,6 +183,7 @@ class OrcaModel(AvoidanceModel):
         return np.array(agent["new"], dtype=float)
 
     def reset(self) -> None:
+        self._perceived = {}
         for agent in self._agents:
             agent["pref"] = np.zeros(2)
             agent["vel"] = np.zeros(2)

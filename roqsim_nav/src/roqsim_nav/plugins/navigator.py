@@ -95,6 +95,8 @@ from ..grid import DEFAULT_RESOLUTION, build_grid, grid_key
 from ..handle import NavHandle, Sequencer
 from ..obstacles import holdable_roots
 from ..outputs import available, resolve_output
+from ..perception import DEFAULTS as PERCEPTION_DEFAULTS
+from ..perception import Sight
 from ..planner import GridPlanner
 from ..state import NavState
 
@@ -139,6 +141,10 @@ OUTPUT_KEYS = (
 #: solver treats it as immovable and it shoves anything free it touches, however politely that thing
 #: stopped for it.
 AVOIDANCE_KEYS = ("steer", "stop", "reroute", "params", "sidestep")
+
+#: How fast a thing it meets is taken to come at it when it decides how far to look (m/s): a
+#: person's free walking speed, 1.34 m/s, rounded up.
+_PACE = 1.5
 
 #: How the planned path is turned into motion.
 #:
@@ -228,6 +234,20 @@ AVOIDANCE_SCHEMA = {
         ),
     ),
     **_PROBE_FIELDS,
+}
+
+#: ``perception:``: what a mover sees and how fast it reacts to it (:mod:`roqsim_nav.perception`).
+PERCEPTION_SCHEMA = {
+    "eye_height": Field(
+        float, default=PERCEPTION_DEFAULTS["eye_height"], unit="m", doc="above its body's bottom"
+    ),
+    "fov": Field(float, default=PERCEPTION_DEFAULTS["fov"], unit="deg", doc="to each side"),
+    "memory": Field(
+        float, default=PERCEPTION_DEFAULTS["memory"], unit="s", doc="what went out of sight is kept"
+    ),
+    "reaction": Field(
+        float, default=PERCEPTION_DEFAULTS["reaction"], unit="s", doc="in sight this long to count"
+    ),
 }
 
 #: ``planner:``.
@@ -490,6 +510,15 @@ class NavigatorPlugin(Plugin):
         "loop": Field(bool, default=False, doc="cycle the route forever"),
         "arrival_radius": Field(float, default=0.25, unit="m", doc="a goal counts as reached"),
         "avoidance": Field(dict, schema=AVOIDANCE_SCHEMA, doc="what it does about the unplanned"),
+        "perception": Field(
+            (dict, bool),
+            default=None,
+            schema=PERCEPTION_SCHEMA,
+            doc=(
+                "it meets only what it sees; default: everything, or what its embodiment declares; "
+                "false: everything, whatever that declares"
+            ),
+        ),
         "params": Field(dict, default={}, doc="this mover's own keys for the steer model"),
         "radius": Field(float, default=None, unit="m", doc="footprint; default: measured"),
         "max_speed": Field(
@@ -534,6 +563,7 @@ class NavigatorPlugin(Plugin):
         self._period = 0.0
         self._started = False
         self._caution: CautionProbe | None = None
+        self._sight: Sight | None = None
         self._bid = -1
         self._seq = Sequencer()
         self._plan_pending = True
@@ -545,6 +575,8 @@ class NavigatorPlugin(Plugin):
         self._commanded = False
         #: The ``avoidance:`` keys this mover took from its output, as logged at configure.
         self.avoidance_defaults_taken: dict = {}
+        #: The ``perception:`` keys this mover took from its output, as logged at configure.
+        self.perception_taken: dict = {}
         #: ``(sim time, xy)`` of the last tick, for the velocity of a body whose pose is written.
         self._last_pose: tuple[float, np.ndarray] | None = None
         #: The speed the probe's pace has reached (m/s), or ``None`` while nothing paces it.
@@ -597,6 +629,14 @@ class NavigatorPlugin(Plugin):
             if key not in self.ACTIONS:
                 errors.append(f"'actions' names {key!r}; the actions are {', '.join(self.ACTIONS)}")
         errors += _validate_avoidance(config, self.base_dir)
+        perception = config.get("perception")
+        if isinstance(perception, Mapping):
+            errors += Sight.validate(perception)
+        elif perception is True:
+            errors.append(
+                "'perception: true' says nothing: give its keys ({eye_height, fov, memory, "
+                "reaction}), or leave it out for what the embodiment declares"
+            )
         avoid_spec = config.get("avoidance")
         avoid_spec = avoid_spec if isinstance(avoid_spec, dict) else {}
         exact = config.get("route_mode") == "exact"
@@ -754,6 +794,9 @@ class NavigatorPlugin(Plugin):
             }
         )
         self._caution.attach(ctx, entity)
+        self._sight = self._perception(entity)
+        if self._sight is not None:
+            self._sight.attach(self._caution._own)
         # `sidestep: false` keeps it off, whatever its embodiment declares: a world's own key wins.
         side = avoid.get("sidestep")
         self._sidestep = (
@@ -794,6 +837,55 @@ class NavigatorPlugin(Plugin):
                 pose=lambda: self._pose_snapshot,
             ),
         )
+
+    def _perception(self, entity) -> Sight | None:
+        """What this mover perceives: ``perception:`` over what its embodiment declares, each value
+        taken logged; ``None`` for a mover that perceives everything (none declared, or
+        ``perception: false``)."""
+        own = self.config.get("perception")
+        if own is False:
+            return None
+        declared = dict(getattr(self._output, "perception", None) or {})
+        own = dict(own or {})
+        if not declared and not own:
+            return None
+        taken = {k: v for k, v in declared.items() if k not in own}
+        if taken:
+            logger.info(
+                "navigator %s: perception from its %s output: %s",
+                self.entity,
+                type(self._output).__name__,
+                ", ".join(f"{k}={v}" for k, v in sorted(taken.items())),
+            )
+        self.perception_taken = taken
+        return Sight({**declared, **own})
+
+    def _look(self, ctx, speed: float) -> None:
+        """Look once this tick, and tell the probe what it perceives.
+
+        It looks as far as anything could matter to it: as far as its probe reaches at its speed,
+        plus what a thing walking at a person's pace covers in its ``horizon`` and the distance it
+        steps aside from, and, while a model steers it, as far as the model looks."""
+        probe = self._caution
+        reach = max(probe.lookahead, probe.horizon * speed) + probe.horizon * _PACE + 1.0
+        if self._sidestep is not None:
+            reach += self._sidestep["onset"]
+        if self._avoid is not None and self._yields:
+            reach = max(reach, float(getattr(self._avoid.model, "neighbor_dist", 0.0)))
+        model, data = ctx.model, ctx.data
+        st = self._state
+        probe.perceived = self._sight.look(
+            ctx,
+            float(ctx.sim_time),
+            st.pos,
+            st.yaw,
+            probe.things(model),
+            reach,
+            held=probe.held_geoms(model, data),
+        )
+        if self._avoid is not None and self._yields and self._agent != NO_AGENT:
+            names = probe.owner_names
+            self._avoid.perceive(self._agent, [names[o] for o in probe.perceived if o in names])
 
     def _resolve_output(self, ctx, entity):
         """The embodiment, named or probed. ``auto`` reports every reason it tried, not the first."""
@@ -909,6 +1001,8 @@ class NavigatorPlugin(Plugin):
         # name one declared after this mover.
         self._caution.resolve_ignored(ctx)
         self._caution.reset()
+        if self._sight is not None:
+            self._sight.reset()
         self._accum = 0.0
         self._started = bool(self.config.get("autostart", True))
         # Run N must not inherit run N-1's route, nor its completion latch.
@@ -985,6 +1079,8 @@ class NavigatorPlugin(Plugin):
         if float(np.hypot(wanted[0], wanted[1])) < STOPPED:
             # Its own route asks for no speed: a dwell, or a goal reached.
             self._caution.leg_ended()
+        if self._sight is not None:
+            self._look(ctx, float(self._state.speed))
         if self._avoid is not None:
             preferred = wanted
             entity = ctx.entities.get(self.entity)

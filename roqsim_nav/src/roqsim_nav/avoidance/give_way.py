@@ -84,6 +84,8 @@ class GiveWayModel(AvoidanceModel):
         self.strength = 1.6
         self.side = "right"
         self._excluded: dict[int, set[int]] = {}
+        #: What each agent's mover perceives, as agent ids; an agent not here sees every other.
+        self._perceived: dict[int, set[int]] = {}
 
     def configure(self, ctx, params: dict) -> None:
         self.neighbor_dist = float(params.get("neighbor_dist", self.neighbor_dist))
@@ -139,8 +141,11 @@ class GiveWayModel(AvoidanceModel):
                 continue
             push = np.zeros(2)
             skip = self._excluded.get(aid, ())
+            sees = self._perceived.get(aid)
             for other, they in self._agents.items():
                 if other == aid or not they["present"] or other in skip:
+                    continue
+                if sees is not None and other not in sees:
                     continue
                 push += self._avoid(me, they, pref)
             if not push.any():
@@ -211,7 +216,11 @@ class GiveWayModel(AvoidanceModel):
     def exclude(self, aid, other) -> None:
         self._excluded.setdefault(aid, set()).add(other)
 
+    def perceive(self, aid, others) -> None:
+        self._perceived[aid] = set(others)
+
     def reset(self) -> None:
+        self._perceived = {}
         self._result = {}
         for agent in self._agents.values():
             agent["vel"] = np.zeros(2)

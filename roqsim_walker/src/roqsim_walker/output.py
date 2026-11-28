@@ -56,12 +56,21 @@ WALKER_AVOIDANCE = MappingProxyType(
 )
 
 
+#: What a walker perceives, when its world does not say: from an eye 1.64 m up, a man's standing eye
+#: height, within 75 degrees to either side of its heading, what it has had in sight 0.4 s, and what
+#: went out of sight for 4 s after. ``roqsim_nav``'s navigator documents each key.
+WALKER_PERCEPTION = MappingProxyType(
+    {"eye_height": 1.64, "fov": 75.0, "memory": 4.0, "reaction": 0.4}
+)
+
+
 class WalkerOutput(NavOutput):
     """Moves a walker's nav root and animates its body to match."""
 
     kinematics = "holonomic"  # a person can step in any direction, including sideways
     update_hz = WALKER_UPDATE_HZ
     avoidance_defaults = WALKER_AVOIDANCE
+    perception = WALKER_PERCEPTION
     #: A person's half width, 0.23 m: the disc a walker is to an avoidance model. Its model's hips
     #: are 0.66 m across, wider than a person's.
     agent_radius = 0.23
