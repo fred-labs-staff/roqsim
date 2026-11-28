@@ -378,3 +378,36 @@ def test_a_bad_perception_is_refused(tmp_path, perception, says):
     with pytest.raises((PluginError, ValueError)) as err:
         _engine(tmp_path, [_walker("w", (0.0, 0.0), [(4.0, 0.0)], perception=perception)])
     assert says in str(err.value)
+
+
+def test_on_its_route_its_probe_leaves_out_a_robot_round_a_corner_it_cannot_yet_see(tmp_path):
+    # Its corridor follows its route round the corner, and at 1.4 m/s reaches 4.2 m ahead: the
+    # robot past the corner is in it from the start, hidden by the corner's walls. The probe
+    # takes it in only once the walker has had it in sight for its reaction time.
+    engine = _engine(
+        tmp_path,
+        [
+            _walker("w", (-4.0, 0.0), [(0.0, 0.0), (0.0, 4.0)], speed=1.4),
+            _robot("robot", (0.0, 1.0)),
+            _wall("a_out", -5.0, -0.45, 0.45, -0.45),
+            _wall("a_in", -5.0, 0.45, -0.45, 0.45),
+            _wall("b_in", -0.45, 0.45, -0.45, 4.5),
+            _wall("b_out", 0.45, -0.45, 0.45, 4.5),
+        ],
+    )
+    try:
+        probe = _nav(engine, "w")._caution
+        seen = taken = None
+        for _ in range(int(4.0 / engine.ctx.dt)):
+            engine.step()
+            t = float(engine.ctx.sim_time)
+            if seen is None and _in_sight(engine, "w", "robot"):
+                seen = t
+            if taken is None and probe.gap is not None:
+                taken = t
+        assert seen is not None, "it never saw the robot round the corner"
+        assert taken is None or taken >= seen + 0.4 - 0.05, (
+            f"its probe had the robot in its way at {taken:.2f} s; it could see it from {seen:.2f} s"
+        )
+    finally:
+        engine.shutdown()

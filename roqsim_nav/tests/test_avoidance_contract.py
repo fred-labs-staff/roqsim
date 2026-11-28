@@ -34,8 +34,11 @@ CRATE = """<mujoco model="crate">
 ROOM = HERE / "data" / "open_room.xml"  # walls, but nothing to plan around
 
 
-def _world(tmp_path, *, movers=1, avoidance=None, yields=True, model=STUB, subject=False):
-    """``avoidance`` is what each mover names -- there is no world-level entry to declare."""
+def _world(
+    tmp_path, *, movers=1, avoidance=None, yields=True, model=STUB, subject=False, perception=None
+):
+    """``avoidance`` is what each mover names -- there is no world-level entry to declare;
+    ``perception``, what each perceives."""
     crate = tmp_path / "crate.xml"
     crate.write_text(CRATE)
     components = []
@@ -54,6 +57,7 @@ def _world(tmp_path, *, movers=1, avoidance=None, yields=True, model=STUB, subje
                         "navigator": {
                             "speed": 0.5,
                             "goals": [[2.0, float(i)]],
+                            **({"perception": perception} if perception else {}),
                             # With `yields=False` the FIRST mover opts out and the rest still name
                             # the model -- a world where nobody names one has no model at all, which
                             # is a different case and has its own test.
@@ -336,5 +340,30 @@ def test_a_mover_placed_elsewhere_submits_no_jump_as_velocity(tmp_path):
             (sub,) = stub.submissions.values()
             fastest = max(fastest, float(np.linalg.norm(sub["vel"])))
         assert fastest < 1.0, f"it submitted {fastest:.1f} m/s for being placed elsewhere"
+    finally:
+        engine.shutdown()
+
+
+def test_a_model_that_cannot_limit_what_an_agent_perceives_is_refused_at_load(tmp_path):
+    # The stub does not implement `perceive`: a mover that perceives and steers by it would steer
+    # round what it cannot see, so the world is refused when it loads, naming the model.
+    engine = Engine(_world(tmp_path, avoidance={"model": STUB}, perception={"fov": 75.0}))
+    engine.ctx.seed = 1
+    with pytest.raises((RegistryError, PluginError, RuntimeError)) as err:
+        engine.setup()
+    assert "cannot limit an agent's steering to what its mover perceives" in str(err.value)
+    assert "RecordingModel" in str(err.value) or "stub_avoidance" in str(err.value)
+
+
+def test_a_model_without_perceive_still_serves_movers_that_perceive_everything(tmp_path):
+    # without `perception` nothing asks the stub to limit anything: it loads and runs
+    engine = Engine(_world(tmp_path, avoidance={"model": STUB}))
+    engine.ctx.seed = 1
+    engine.setup()
+    try:
+        engine.reset()
+        for _ in range(int(0.5 / engine.ctx.dt)):
+            engine.step()
+        assert _stub(engine).solves > 0
     finally:
         engine.shutdown()
