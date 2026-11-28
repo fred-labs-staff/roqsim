@@ -153,10 +153,21 @@ def test_a_negative_margin_is_refused(tmp_path):
     assert "avoidance.margin" in str(err.value)
 
 
-@pytest.mark.parametrize("avoidance", [{"margin": 0.8, "decel": 0.0}, {"decel": 0.0}])
-def test_a_margin_without_decel_is_refused_at_load(tmp_path, avoidance):
-    # the walker declares margin 0.8 m, so a world that turns its decel off has a margin that would
-    # do nothing
+def test_a_margin_without_decel_is_refused_at_load(tmp_path):
     with pytest.raises(Exception) as err:
-        _world(tmp_path, 0.0, avoidance=avoidance)
+        _world(tmp_path, 0.0, avoidance={"margin": 0.8, "decel": 0.0})
     assert "'avoidance.margin' needs 'avoidance.decel' > 0" in str(err.value)
+
+
+def test_a_world_that_turns_decel_off_does_not_take_the_walkers_margin(tmp_path):
+    # the walker declares margin 0.8 m, which slows at decel: a world that turns decel off loads,
+    # as it did before margin, and takes no margin
+    engine, _ = _world(tmp_path, 0.0, avoidance={"decel": 0.0})
+    try:
+        nav = next(
+            p for p in engine.plugins if type(p).__name__ == "NavigatorPlugin" and p.entity == "w"
+        )
+        assert "margin" not in nav.avoidance_defaults_taken
+        assert nav._caution.margin == 0.0
+    finally:
+        engine.shutdown()

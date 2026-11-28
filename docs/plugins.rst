@@ -639,7 +639,8 @@ it, and slows to it at ``decel`` from the speed it has, rather than at once. A c
 the corridor it passes first only with ``margin`` to spare, and otherwise stands ``wait_gap`` short
 of it. While a model steers the mover, the model judges what crosses, and ``margin`` is not read.
 The ``walker`` output declares ``margin: 0.8``. A ``margin`` without ``decel`` would do nothing, and
-is refused at load.
+is refused at load; a world that sets ``decel: 0`` and no ``margin`` takes no ``margin`` from its
+embodiment.
 
 .. code-block:: yaml
 
