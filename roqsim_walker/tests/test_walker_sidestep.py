@@ -189,11 +189,9 @@ def test_two_walkers_head_on_beside_each_others_line_pass_on_the_side_they_are(t
         engine.shutdown()
 
 
-#: Two reaching the crossing at nearly the same moment see each other only when one is inside the
-#: other's corridor, by then touching: a walker does not yet see a crosser coming.
-_UNSEEN_TIE = pytest.mark.xfail(
-    strict=True, reason="a crosser is seen only once it is inside the corridor"
-)
+#: Two reaching the crossing at the same moment each see the other coming and each slow to let it go
+#: first, alike, until they touch: nothing breaks a tie between two that both give way.
+_TIE = pytest.mark.xfail(strict=True, reason="two that both give way at a tie slow alike")
 
 
 @pytest.mark.parametrize(
@@ -203,11 +201,10 @@ _UNSEEN_TIE = pytest.mark.xfail(
             (d, v)
             for d in (2.6, 2.9, 3.0, 3.1, 3.4)
             for v in (0.5, 1.0, 1.4)
-            if (d, v) not in {(3.0, 1.0), (3.0, 1.4), (3.1, 1.4)}
+            if (d, v) not in {(3.0, 1.0), (3.0, 1.4)}
         ],
-        pytest.param(3.0, 1.0, marks=_UNSEEN_TIE),
-        pytest.param(3.0, 1.4, marks=_UNSEEN_TIE),
-        pytest.param(3.1, 1.4, marks=_UNSEEN_TIE),
+        pytest.param(3.0, 1.0, marks=_TIE),
+        pytest.param(3.0, 1.4, marks=_TIE),
     ],
 )
 def test_two_walkers_crossing_take_turns_without_touching(tmp_path, dist, speed):

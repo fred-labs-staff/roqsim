@@ -202,6 +202,12 @@ _PROBE_FIELDS = {
         float, default=None, unit="m", doc="disc a blockage marks; default: half the corridor width"
     ),
     "ignore": Field(list, default=[], doc="entities this mover never stops for"),
+    "margin": Field(
+        float,
+        default=0.0,
+        unit="m",
+        doc="with decel: a crosser passes no nearer, as predicted, or it slows to let it go first",
+    ),
 }
 
 #: ``avoidance.sidestep``: how far a mover on its route may leave it to get round what stands in
@@ -1101,6 +1107,8 @@ class NavigatorPlugin(Plugin):
         path = self._path_ahead()
         if self._sidestep is not None and not self._yields and not self._core.exact:
             wanted, path = self._step_aside(ctx, wanted, path)
+        # Stepping aside, it is already dealing with what it meets: crossers are not judged ahead.
+        self._caution.anticipating = self._aside <= 0.0
         if self._caution.check(ctx, self._state.pos, 0.0, wanted, path, steering=steering):
             # Hold: do NOT advance along the path. Whether the progress clock is rebased with it
             # depends on what is in the way. Traffic will move, so waiting for it must never look
@@ -1128,7 +1136,11 @@ class NavigatorPlugin(Plugin):
 
     def _paced(self, wanted, dt: float):
         """``wanted`` at the speed the way ahead allows (``avoidance.decel``) and, after a hold,
-        rising to it with ``avoidance.tau``. Unchanged for a mover that sets neither."""
+        rising to it with ``avoidance.tau``. Unchanged for a mover that sets neither.
+
+        What is in its way slows it at once to the speed of a stop short of it, which is already
+        at ``decel``; a crosser it lets go first (``avoidance.margin``) slows it at ``decel`` from
+        the speed it has."""
         probe = self._caution
         if not probe.enabled or (probe.decel <= 0.0 and probe.tau <= 0.0):
             return wanted
@@ -1137,15 +1149,20 @@ class NavigatorPlugin(Plugin):
             # Standing at a goal, or with nowhere to go: not a hold, so it walks off as it would.
             self._paced_speed = None
             return wanted
-        target = speed if probe.limit is None else min(speed, probe.limit)
+        hard = speed if probe.limit is None else min(speed, probe.limit)
+        soft = hard if probe.ease is None else min(hard, probe.ease)
         now = self._paced_speed
-        if now is None or target <= now:
+        if now is None or hard <= now and soft >= hard:
             # Slowing follows the stop the gap ahead allows, which is already at `decel`.
-            now = target
-        elif probe.tau > 0.0:
-            now += (target - now) * (1.0 - float(np.exp(-dt / probe.tau)))
-        else:
-            now = target
+            now = hard if now is None or probe.ease is None else min(hard, now)
+        if soft < now:
+            now = max(soft, now - probe.decel * dt)
+        elif soft > now:
+            if probe.tau > 0.0:
+                now += (soft - now) * (1.0 - float(np.exp(-dt / probe.tau)))
+            else:
+                now = soft
+        now = min(now, hard)
         self._paced_speed = now
         return np.asarray(wanted, dtype=float) * (now / speed)
 

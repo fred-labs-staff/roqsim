@@ -40,7 +40,8 @@ WALKER_UPDATE_HZ = 60.0
 #: standing or coming the other way and 0.85 m short of a mover crossing ahead, follows what walks
 #: ahead of it, waits 0.39 s once the way has cleared and walks off with a 0.54 s time constant; on
 #: its route, it steps aside round what stands in its way from 2.2 m before it, up to 1.0 m from its
-#: route and 0.24 m clear of it, and is back on its route 4.85 m after.
+#: route and 0.24 m clear of it, and is back on its route 4.85 m after. It goes first before a
+#: crosser only where the two would pass 0.8 m apart or more, and otherwise slows to let it go first.
 #: ``roqsim_nav``'s navigator documents each key.
 WALKER_AVOIDANCE = MappingProxyType(
     {
@@ -51,6 +52,7 @@ WALKER_AVOIDANCE = MappingProxyType(
         "wait_gap": 0.85,
         "clear_time": 0.39,
         "tau": 0.54,
+        "margin": 0.8,
         "sidestep": MappingProxyType({"max": 1.0, "onset": 2.2, "back": 4.85, "clearance": 0.24}),
     }
 )

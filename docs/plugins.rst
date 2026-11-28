@@ -626,8 +626,19 @@ what the gap then allows within a tick. A mover crossing that will have left the
 gets there is passed without slowing, and so is one that will reach the point where their ways cross
 after it does: of two crossing, the one that gets there first goes first, and within 0.1 s of each
 other, the one coming from the other's right. One moving along the way is followed, at its speed and
-that of a stop in the gap left, and never stood for. Once the way has cleared and ``clear_time`` has passed,
-the speed rises to the set speed with the time constant ``tau``.
+that of a stop in the gap left, and never stood for. Once the way has cleared and ``clear_time``
+has passed, the speed rises to the set speed with the time constant ``tau``.
+
+**A crosser seen coming** is ``margin``. Without it (the default) a mover judges a crosser only once
+it is in its corridor, by who reaches the crossing first. With it, it judges every thing it
+perceives that moves across its way, before it is in the corridor: from both their motions, the
+least distance, centre to centre, the two would come to, for a crossing within ``horizon`` seconds.
+Where that is at least ``margin`` it walks on, going first or letting the other pass well ahead;
+where it is not, it takes the highest speed that keeps ``margin``, the crosser then passing ahead of
+it, and slows to it at ``decel`` from the speed it has, rather than at once. A crosser already in
+the corridor it passes first only with ``margin`` to spare, and otherwise stands ``wait_gap`` short
+of it. While a model steers the mover, the model judges what crosses, and ``margin`` is not read.
+The ``walker`` output declares ``margin: 0.8``.
 
 .. code-block:: yaml
 
@@ -638,6 +649,7 @@ the speed rises to the set speed with the time constant ``tau``.
      wait_gap: 0.85      # m: ...and this short of a mover crossing ahead (default: stop_gap)
      clear_time: 0.39    # s: the way stays clear this long before it walks off
      tau: 0.54           # s: walking off, its speed rises with this time constant (0: at once)
+     margin: 0.8         # m: a crosser passes no nearer, as predicted, or it slows to let it go first
 
 While a model steers the mover (``steer``), the probe looks only ``lookahead`` ahead, whatever
 ``horizon`` says, and stands ``stop_gap`` short of a mover crossing as of anything else, not

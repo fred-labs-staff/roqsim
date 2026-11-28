@@ -78,6 +78,7 @@ _TUNING = (
     "forget_after",
     "blockage_radius",
     "ignore",
+    "margin",
 )
 
 #: Keys nothing reads, each with why: a world that sets one is refused with this, rather than having
@@ -170,6 +171,19 @@ class CautionProbe:
         self.tau = float(cfg.get("tau", 0.0))
         #: With ``decel``: the speed the gap ahead allows this tick (m/s), or ``None`` for any.
         self.limit: float | None = None
+        #: With ``decel``: the least distance (m, centre to centre) it lets a thing crossing its way
+        #: come, as predicted from both their motions: it goes first only with that much to spare,
+        #: and otherwise slows, at ``decel``, to let the other go first by as much. 0 judges a
+        #: crosser only once it is in the corridor, and goes first by who reaches the crossing first.
+        self.margin = float(cfg.get("margin", 0.0))
+        #: With ``margin``: the speed it slows to, at ``decel``, for a crosser it lets go first, this
+        #: tick (m/s), or ``None`` for any. Read by the navigator, which paces the speed.
+        self.ease: float | None = None
+        #: Whether it judges crossers ahead this tick (``margin``): set by its navigator, which
+        #: leaves it off while the mover steps aside, when what it meets is already its business.
+        self.anticipating = True
+        #: How fast each thing moved, over the last :data:`_SLOWING_WINDOW`: thing -> [(t, speed)].
+        self._speeds: dict[int, list] = {}
         #: ``(sim time, *_moving())`` of the tick last looked at.
         self._tick: tuple | None = None
         #: How long a blockage is treated as traffic that will clear. While the mover is inside
@@ -256,6 +270,7 @@ class CautionProbe:
             "stop_gap",
             "wait_gap",
             "tau",
+            "margin",
         ):
             if key in numbers and numbers[key] < 0:
                 errors.append(f"'avoidance.{key}' must be >= 0")
@@ -320,11 +335,13 @@ class CautionProbe:
         self.blocked = False
         self.gap = None
         self.limit = None
+        self.ease = None
         self._tick = None
         self.blocker_xy = None
         self.blocker_points = []
         self._front = None  # measured again at the run's first look
         self._track = {}
+        self._speeds = {}
 
     def leg_ended(self) -> None:
         """The mover stands with nowhere to go -- a dwell, a goal reached -- so what a hold left is
@@ -366,6 +383,7 @@ class CautionProbe:
             self._blocked_since = None
             self.gap = None
             self.limit = None
+            self.ease = None
             self.blocker_xy = None
             self.blocker_points = []
             return False
@@ -380,8 +398,11 @@ class CautionProbe:
             ctx, origin_xy, heading, path, reach, now=now, speed=None if graded else speed
         )
         self.limit = None
+        self.ease = None
         if graded:
             gap, points, hold = self._grade(things, speed, steering, origin_xy, heading)
+            if self.margin > 0.0 and not steering and self.anticipating:
+                self.ease = self._anticipate(origin_xy, heading, speed, now)
         else:
             hold = gap is not None
         self.gap = gap
@@ -466,6 +487,76 @@ class CautionProbe:
         # a tie: it goes first if it comes from the mover's right
         return float(h[0] * rel[1] - h[1] * rel[0]) > 0.0
 
+    def _goes_first(self, t, origin, heading: float, speed: float) -> bool:
+        """Whether the mover goes first before a thing crossing its way: with ``margin``, when it
+        gets to where their ways cross first and passes it no nearer than ``margin``; without, when
+        it gets there first (:meth:`_first`)."""
+        if self.margin <= 0.0:
+            return self._first(t, origin, heading, speed)
+        h = np.array([math.cos(heading), math.sin(heading)])
+        rel = np.asarray(t["xy"], dtype=float) - np.asarray(origin, dtype=float)
+        v = np.asarray(t["v"], dtype=float)
+        return self._first(t, origin, heading, speed) and _miss(rel, v, h, speed) >= self.margin
+
+    def _anticipate(self, origin, heading: float, speed: float, now: float) -> float | None:
+        """The speed to slow to for what crosses its way ahead, judged from its motion before it is
+        in the corridor: ``None`` where nothing asks it to slow.
+
+        Each perceived thing moving across its way (more across it than half as fast along it, and
+        at :data:`_JUDGED` or faster)
+        whose way crosses its own ahead within ``horizon`` seconds is judged by the least distance,
+        centre to centre, the two would come to, each going on as it goes now. Where that is at
+        least ``margin`` at the mover's speed, it walks on: it goes first, or the other passes well
+        ahead. Where it is not, it takes the highest speed that keeps ``margin`` -- slower, the
+        other passes ahead of it -- or, where none does, the one that keeps the most. Where it gets
+        to the crossing first (:meth:`_first`) and the other is slowing, it walks on. What stands,
+        or goes along its way, is the corridor's to meet."""
+        h = np.array([math.cos(heading), math.sin(heading)])
+        n = np.array([-h[1], h[0]])
+        o = np.asarray(origin, dtype=float)
+        ease = None
+        velocity = self._tick[4] if self._tick is not None else {}
+        for thing, v in velocity.items():
+            if self.perceived is not None and thing not in self.perceived:
+                continue
+            v = np.asarray(v, dtype=float)
+            v_lat, v_along = float(v @ n), float(v @ h)
+            if float(np.linalg.norm(v)) < _JUDGED or abs(v_lat) <= max(
+                _CROSSING, 0.5 * abs(v_along)
+            ):
+                continue
+            rel = np.asarray(self._track[thing][-1][1], dtype=float) - o
+            cross = h[0] * v[1] - h[1] * v[0]
+            # where their ways cross: o + s h = xy + u v
+            s = (rel[0] * v[1] - rel[1] * v[0]) / cross
+            u = (rel[0] * h[1] - rel[1] * h[0]) / cross
+            if s < 0.0 or u < 0.0 or min(u, s / max(speed, 1e-6)) > self.horizon:
+                continue
+            if _miss(rel, v, h, speed) >= self.margin:
+                continue
+            first = self._first({"xy": o + rel, "v": v}, o, heading, speed)
+            if first and self._slowing(thing):
+                # It gets there first and the other is giving way to it: it keeps going first,
+                # as the one ahead does between two people, rather than both giving way alike.
+                continue
+            best, keep = 0.0, -1.0
+            for k in range(_EASE_STEPS, -1, -1):
+                vw = speed * k / _EASE_STEPS
+                d = _miss(rel, v, h, vw)
+                if d >= self.margin:
+                    best = vw
+                    break
+                if d > keep + 1e-9:
+                    best, keep = vw, d
+            ease = best if ease is None else min(ease, best)
+        return ease
+
+    def _slowing(self, thing: int) -> bool:
+        """Whether ``thing`` has slowed by more than :data:`_SLOWING` within the last
+        :data:`_SLOWING_WINDOW`."""
+        seen = self._speeds.get(thing)
+        return bool(seen) and max(v for _, v in seen) - seen[-1][1] > _SLOWING
+
     def _grade(self, things, speed: float, steering: bool = False, origin=None, heading=0.0):
         """``(gap, points, hold)`` for a speed that follows the gap ahead, and :attr:`limit`.
 
@@ -492,7 +583,7 @@ class CautionProbe:
                 out = (half - t["lat_lo"]) / v_lat if v_lat > 0 else (t["lat_hi"] + half) / -v_lat
                 if out < t["dist"] / max(speed, 1e-6):
                     continue
-                if not steering and self._first(t, origin, heading, speed):
+                if not steering and self._goes_first(t, origin, heading, speed):
                     # It will cross where the mover is going after the mover has: the mover passes
                     # first, and it is for the one crossing to wait.
                     continue
@@ -710,9 +801,15 @@ class CautionProbe:
         velocity = {}
         for o in set(owners[counts].tolist()):
             velocity[o] = self._velocity(o, data.xpos[self._owner_body[o]][:2], now)
+            if self.margin > 0.0:
+                seen = self._speeds.setdefault(o, [])
+                seen.append((now, float(np.linalg.norm(velocity[o]))))
+                while now - seen[0][0] > _SLOWING_WINDOW:
+                    seen.pop(0)
         for o in list(self._track):
             if o not in velocity:
                 del self._track[o]
+                self._speeds.pop(o, None)
         others, owners = others[counts], owners[counts]
         # Where a thing is in the corridor is where its body is, what can collide: a robot's base,
         # a walker's legs and hips, not its swinging arms. A thing nothing of which collides is
@@ -790,6 +887,27 @@ class CautionProbe:
             for g, o in zip(geoms, self._owner.tolist(), strict=True):
                 self._owner_body.setdefault(o, int(model.body_rootid[model.geom_bodyid[g]]))
         return self._others, self._owner
+
+
+#: A thing that has slowed by more than this (m/s) within the window (s) is giving way.
+_SLOWING = 0.1
+_SLOWING_WINDOW = 0.6
+
+#: Slower than this (m/s), a thing is not judged from its motion but met where it is: a walker
+#: shuffling aside in a crowd is not a crosser.
+_JUDGED = 0.2
+
+#: Speeds tried, between standing and the mover's own, for the highest that lets a crosser go first.
+_EASE_STEPS = 20
+
+
+def _miss(rel, v, heading, speed: float) -> float:
+    """The least distance between a mover going ``speed`` along ``heading`` and a thing ``rel``
+    from it going ``v``, from now on."""
+    w = np.asarray(v, dtype=float) - speed * np.asarray(heading, dtype=float)
+    ww = float(w @ w)
+    t = 0.0 if ww < 1e-12 else max(0.0, -float(np.asarray(rel) @ w) / ww)
+    return float(np.linalg.norm(np.asarray(rel) + w * t))
 
 
 #: How far two extents must overlap to meet: a millimetre, so that what rests flush on a mover's top
