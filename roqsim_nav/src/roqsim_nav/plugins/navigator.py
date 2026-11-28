@@ -142,6 +142,13 @@ OUTPUT_KEYS = (
 #: stopped for it.
 AVOIDANCE_KEYS = ("steer", "stop", "reroute", "params", "sidestep")
 
+#: Why a `margin` without `decel` is refused: it slows a mover at `decel`, and without one it would
+#: be read and do nothing.
+_MARGIN_NEEDS_DECEL = (
+    "'avoidance.margin' needs 'avoidance.decel' > 0: a crosser is let go first by slowing at "
+    "decel, and without it margin would do nothing"
+)
+
 #: How fast a thing it meets is taken to come at it when it decides how far to look (m/s): a
 #: person's free walking speed, 1.34 m/s, rounded up.
 _PACE = 1.5
@@ -322,6 +329,9 @@ def _validate_avoidance(config: dict, base_dir) -> list[str]:
         for key, why in RETIRED.items()
         if key in spec
     ]
+    margin, decel = spec.get("margin"), spec.get("decel")
+    if _number(margin) and margin > 0.0 and _number(decel) and decel <= 0.0:
+        errors.append(_MARGIN_NEEDS_DECEL)
     if spec.get("sidestep") is True:
         errors.append(
             "'avoidance.sidestep' is a block, or false to keep a mover standing before what is in "
@@ -775,6 +785,9 @@ class NavigatorPlugin(Plugin):
             )
         avoid = {**taken, **avoid}
         self.avoidance_defaults_taken = taken
+        if float(avoid.get("margin") or 0.0) > 0.0 and float(avoid.get("decel") or 0.0) <= 0.0:
+            # Checked once the embodiment's keys are in: either side may set either key.
+            raise RuntimeError(f"navigator {self.address!r}: {_MARGIN_NEEDS_DECEL}")
         # `avoidance.steer` names the model that gives way for this mover, or 'none' to never
         # deviate. There is no world-level entry to declare: the model appears when a mover asks to
         # be steered, and the first to ask fixes it for the world.

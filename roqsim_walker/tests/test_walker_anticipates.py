@@ -151,3 +151,12 @@ def test_a_negative_margin_is_refused(tmp_path):
     with pytest.raises(Exception) as err:
         _world(tmp_path, 0.0, avoidance={"margin": -0.1})
     assert "avoidance.margin" in str(err.value)
+
+
+@pytest.mark.parametrize("avoidance", [{"margin": 0.8, "decel": 0.0}, {"decel": 0.0}])
+def test_a_margin_without_decel_is_refused_at_load(tmp_path, avoidance):
+    # the walker declares margin 0.8 m, so a world that turns its decel off has a margin that would
+    # do nothing
+    with pytest.raises(Exception) as err:
+        _world(tmp_path, 0.0, avoidance=avoidance)
+    assert "'avoidance.margin' needs 'avoidance.decel' > 0" in str(err.value)

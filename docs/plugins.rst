@@ -638,7 +638,8 @@ where it is not, it takes the highest speed that keeps ``margin``, the crosser t
 it, and slows to it at ``decel`` from the speed it has, rather than at once. A crosser already in
 the corridor it passes first only with ``margin`` to spare, and otherwise stands ``wait_gap`` short
 of it. While a model steers the mover, the model judges what crosses, and ``margin`` is not read.
-The ``walker`` output declares ``margin: 0.8``.
+The ``walker`` output declares ``margin: 0.8``. A ``margin`` without ``decel`` would do nothing, and
+is refused at load.
 
 .. code-block:: yaml
 
