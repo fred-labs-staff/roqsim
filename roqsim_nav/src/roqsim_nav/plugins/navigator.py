@@ -777,6 +777,9 @@ class NavigatorPlugin(Plugin):
             # Stepping aside is for a mover on its route that looks ahead; a steered one is taken
             # round by its model.
             declared.pop("sidestep", None)
+        if "decel" in avoid and not float(avoid["decel"] or 0.0) > 0.0 and "margin" not in avoid:
+            # A world that turns slowing at `decel` off turns off with it what slows at `decel`.
+            declared.pop("margin", None)
         taken = {k: v for k, v in declared.items() if k not in avoid}
         if taken:
             logger.info(
@@ -788,7 +791,8 @@ class NavigatorPlugin(Plugin):
         avoid = {**taken, **avoid}
         self.avoidance_defaults_taken = taken
         if float(avoid.get("margin") or 0.0) > 0.0 and float(avoid.get("decel") or 0.0) <= 0.0:
-            # Checked once the embodiment's keys are in: either side may set either key.
+            # Checked once the embodiment's keys are in: a world's margin over its embodiment's
+            # decel, or an embodiment that declares a margin and no decel.
             raise RuntimeError(f"navigator {self.address!r}: {_MARGIN_NEEDS_DECEL}")
         # `avoidance.steer` names the model that gives way for this mover, or 'none' to never
         # deviate. There is no world-level entry to declare: the model appears when a mover asks to
