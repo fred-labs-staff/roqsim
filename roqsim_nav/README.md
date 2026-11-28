@@ -182,6 +182,13 @@ root body has been. The same corridor decides holding and setting off. An embodi
 `avoidance:` keys for what it moves (`NavOutput.avoidance_defaults`; a walker a 0.46 m `width`), and
 a world's own key wins.
 
+A mover whose embodiment declares what it perceives (`NavOutput.perception`; the walker does) meets,
+with its probe and its model alike, only what it can see from its eye, within its field of view and
+after its reaction time, and keeps what went out of sight for its memory (`roqsim_nav.perception`).
+What already reaches into its body is in its way all the same. A model that cannot limit an agent to
+what its mover perceives (`AvoidanceModel.perceive`) is refused at load for a mover that perceives and
+steers by it; `perception: false` keeps a mover seeing everything, as one that declares none does.
+
 `reroute` remembers where it was stopped, as a disc that expires after `forget_after`, and plans
 around it. The memory is what makes it work at all: the grid is static, so a mover that only
 re-planned would compute the same path and drive into the same obstacle again. It is deliberately
